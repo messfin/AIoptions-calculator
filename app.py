@@ -202,85 +202,161 @@ class OptionStrategy:
             "risk_reward_ratio": abs(max_profit / max_loss) if max_loss != 0 else float('inf')
         }
 
-@st.cache_data(ttl=300)  # Cache for 5 minutes
+@st.cache_data(ttl=1800)  # Cache for 30 minutes (increased from 5)
 def fetch_stock_data(symbol: str) -> Optional[Dict]:
-    """Fetch real-time stock data from Yahoo Finance"""
-    try:
-        ticker = yf.Ticker(symbol)
-        info = ticker.info
-        hist = ticker.history(period="1d")
-        
-        if hist.empty:
-            return None
+    """Fetch real-time stock data from Yahoo Finance with retry logic"""
+    import time
+    
+    max_retries = 3
+    retry_delay = 2  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            # Add headers to avoid rate limiting
+            ticker = yf.Ticker(symbol)
             
-        current_price = hist['Close'].iloc[-1]
-        
-        return {
-            'symbol': symbol,
-            'price': current_price,
-            'previous_close': info.get('previousClose', current_price),
-            'volume': hist['Volume'].iloc[-1],
-            'market_cap': info.get('marketCap', 0),
-            'company_name': info.get('longName', symbol),
-            'change': current_price - info.get('previousClose', current_price),
-            'change_percent': ((current_price - info.get('previousClose', current_price)) / info.get('previousClose', current_price)) * 100 if info.get('previousClose') else 0
-        }
-    except Exception as e:
-        st.error(f"Error fetching stock data for {symbol}: {str(e)}")
-        return None
+            # Try to get history first (less likely to be rate limited)
+            hist = ticker.history(period="1d")
+            
+            if hist.empty:
+                # If today's data not available, try 5 days
+                hist = ticker.history(period="5d")
+                
+            if hist.empty:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))  # Exponential backoff
+                    continue
+                return None
+            
+            current_price = hist['Close'].iloc[-1]
+            
+            # Try to get info, but don't fail if rate limited
+            try:
+                info = ticker.info
+                company_name = info.get('longName', symbol)
+                previous_close = info.get('previousClose', current_price)
+                market_cap = info.get('marketCap', 0)
+            except:
+                # If info fails, use data from history
+                company_name = symbol
+                previous_close = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                market_cap = 0
+            
+            return {
+                'symbol': symbol,
+                'price': current_price,
+                'previous_close': previous_close,
+                'volume': hist['Volume'].iloc[-1],
+                'market_cap': market_cap,
+                'company_name': company_name,
+                'change': current_price - previous_close,
+                'change_percent': ((current_price - previous_close) / previous_close) * 100 if previous_close else 0
+            }
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # Check if it's a rate limit error
+            if 'rate' in error_msg or '429' in error_msg or 'too many' in error_msg:
+                if attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
+                    st.warning(f"⏳ Rate limited. Retrying in {wait_time} seconds... (Attempt {attempt + 1}/{max_retries})")
+                    time.sleep(wait_time)
+                    continue
+                else:
+                    st.error(f"⚠️ Yahoo Finance rate limit reached for {symbol}. Please try again in a few minutes, or use manual price entry.")
+                    return None
+            else:
+                # Other error
+                st.error(f"Error fetching data for {symbol}: {str(e)}")
+                return None
+    
+    return None
 
-@st.cache_data(ttl=300)
+
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
 def fetch_options_chain(symbol: str, expiration_date: str = None) -> Optional[pd.DataFrame]:
-    """Fetch options chain with IV and Open Interest"""
-    try:
-        ticker = yf.Ticker(symbol)
-        
-        # Get available expiration dates
-        expirations = ticker.options
-        if not expirations:
-            return None
-        
-        # Use provided date or nearest expiration
-        exp_date = expiration_date if expiration_date in expirations else expirations[0]
-        
-        # Get options chain
-        opt_chain = ticker.option_chain(exp_date)
-        
-        # Combine calls and puts
-        calls = opt_chain.calls.copy()
-        calls['type'] = 'call'
-        puts = opt_chain.puts.copy()
-        puts['type'] = 'put'
-        
-        options_df = pd.concat([calls, puts], ignore_index=True)
-        
-        # Select relevant columns
-        columns_to_keep = ['strike', 'lastPrice', 'bid', 'ask', 'volume', 
-                          'openInterest', 'impliedVolatility', 'type', 'inTheMoney']
-        
-        available_columns = [col for col in columns_to_keep if col in options_df.columns]
-        options_df = options_df[available_columns]
-        
-        # Rename for clarity
-        options_df = options_df.rename(columns={
-            'lastPrice': 'premium',
-            'impliedVolatility': 'iv',
-            'openInterest': 'open_interest'
-        })
-        
-        return options_df
-        
-    except Exception as e:
-        st.warning(f"Could not fetch options chain: {str(e)}")
-        return None
+    """Fetch options chain with IV and Open Interest with retry logic"""
+    import time
+    
+    max_retries = 2
+    retry_delay = 3
+    
+    for attempt in range(max_retries):
+        try:
+            ticker = yf.Ticker(symbol)
+            
+            # Get available expiration dates
+            expirations = ticker.options
+            if not expirations:
+                return None
+            
+            # Use provided date or nearest expiration
+            exp_date = expiration_date if expiration_date in expirations else expirations[0]
+            
+            # Get options chain
+            opt_chain = ticker.option_chain(exp_date)
+            
+            # Combine calls and puts
+            calls = opt_chain.calls.copy()
+            calls['type'] = 'call'
+            puts = opt_chain.puts.copy()
+            puts['type'] = 'put'
+            
+            options_df = pd.concat([calls, puts], ignore_index=True)
+            
+            # Select relevant columns
+            columns_to_keep = ['strike', 'lastPrice', 'bid', 'ask', 'volume', 
+                              'openInterest', 'impliedVolatility', 'type', 'inTheMoney']
+            
+            available_columns = [col for col in columns_to_keep if col in options_df.columns]
+            options_df = options_df[available_columns]
+            
+            # Rename for clarity
+            options_df = options_df.rename(columns={
+                'lastPrice': 'premium',
+                'impliedVolatility': 'iv',
+                'openInterest': 'open_interest'
+            })
+            
+            return options_df
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            if ('rate' in error_msg or '429' in error_msg or 'too many' in error_msg) and attempt < max_retries - 1:
+                wait_time = retry_delay * (attempt + 1)
+                time.sleep(wait_time)
+                continue
+            else:
+                if attempt == max_retries - 1:
+                    st.warning(f"⚠️ Could not fetch options chain (rate limited or unavailable). Using manual entry.")
+                return None
+    
+    return None
 
+@st.cache_data(ttl=3600)  # Cache for 1 hour (expirations don't change often)
 def get_available_expirations(symbol: str) -> List[str]:
-    """Get available option expiration dates for a symbol"""
-    try:
-        ticker = yf.Ticker(symbol)
-        return list(ticker.options)
-    except:
-        return []
+    """Get available option expiration dates for a symbol with retry logic"""
+    import time
+    
+    max_retries = 3
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            ticker = yf.Ticker(symbol)
+            options = ticker.options
+            if options:
+                return list(options)
+            return []
+        except Exception as e:
+            error_msg = str(e).lower()
+            if ('rate' in error_msg or '429' in error_msg) and attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
+            return []
+    return []
 
 def find_nearest_option(options_df: pd.DataFrame, strike: float, option_type: str) -> Optional[Dict]:
     """Find the nearest option contract and return its details including IV and OI"""
@@ -396,24 +472,38 @@ def calculate_strategy_greeks(strategy: 'OptionStrategy', risk_free_rate=0.05):
 
 @st.cache_data(ttl=3600)
 def fetch_historical_iv(symbol: str, days=252):
-    """Fetch historical IV data"""
-    try:
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=f"{days}d")
-        
-        if hist.empty:
+    """Fetch historical IV data with retry logic"""
+    import time
+    
+    max_retries = 2
+    retry_delay = 2
+    
+    for attempt in range(max_retries):
+        try:
+            ticker = yf.Ticker(symbol)
+            hist = ticker.history(period=f"{days}d")
+            
+            if hist.empty:
+                if attempt < max_retries - 1:
+                    time.sleep(retry_delay * (attempt + 1))
+                    continue
+                return None
+            
+            # Calculate historical volatility
+            hist['returns'] = np.log(hist['Close'] / hist['Close'].shift(1))
+            hist_vol = hist['returns'].std() * np.sqrt(252)
+            
+            return {
+                'current_hv': hist_vol,
+                'history': hist['returns'].rolling(window=20).std() * np.sqrt(252)
+            }
+        except Exception as e:
+            error_msg = str(e).lower()
+            if ('rate' in error_msg or '429' in error_msg) and attempt < max_retries - 1:
+                time.sleep(retry_delay * (attempt + 1))
+                continue
             return None
-        
-        # Calculate historical volatility
-        hist['returns'] = np.log(hist['Close'] / hist['Close'].shift(1))
-        hist_vol = hist['returns'].std() * np.sqrt(252)
-        
-        return {
-            'current_hv': hist_vol,
-            'history': hist['returns'].rolling(window=20).std() * np.sqrt(252)
-        }
-    except:
-        return None
+    return None
 
 def calculate_iv_rank_percentile(current_iv, options_chain):
     """Calculate IV Rank and IV Percentile from options chain"""

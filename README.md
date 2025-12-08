@@ -13,7 +13,7 @@ A comprehensive options trading calculator built with Streamlit and powered by G
 - **Bid/Ask Spreads** for accurate pricing
 - **Multiple Expiration Dates** - Choose from all available dates
 - **Trading Volume** - See market activity
-- **No API Key Required** - Free Yahoo Finance integration
+- **No API Key Required** - Free Yahoo Finance integration with **smart caching & retry logic**
 
 ### 🎯 Advanced Analytics (NEW!)
 
@@ -99,40 +99,11 @@ pip install -r requirements.txt
 3. **Configure Google API Key:**
 
    - Get your free API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
-   - Add it to `.streamlit/secrets.toml`:
-
-   ```toml
-   GOOGLE_API_KEY = "your-actual-api-key-here"
-   ```
-
-4. **Run the application:**
-
-```bash
-streamlit run app.py
-```
-
-The app will open in your default browser at `http://localhost:8501`
-
-## 📖 How to Use
-
-### Step 1: Select a Strategy
-
-1. Choose a category from the sidebar (Basic, Spreads, Advanced, or Custom)
-2. Select your desired strategy
-
-### Step 2: Configure Parameters
-
-1. Enter the current stock price
-2. For predefined strategies, the option legs are pre-configured
-3. Check "Customize This Strategy" to adjust strikes, premiums, and quantities
-4. For custom strategies, manually configure each option leg
-
-### Step 3: Analyze Results
 
 1. View the interactive payoff diagram
-2. Review key metrics (max profit, max loss, breakeven points)
-3. Click "Generate Comprehensive Report" for AI analysis
-4. Review the AI-generated buy/sell signal and recommendations
+1. Review key metrics (max profit, max loss, breakeven points)
+1. Click "Generate Comprehensive Report" for AI analysis
+1. Review the AI-generated buy/sell signal and recommendations
 
 ## 🎨 Features Highlights
 

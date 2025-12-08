@@ -1,14 +1,3 @@
-# 🚀 Quick Start Guide
-
-## First Time Setup (5 minutes)
-
-### 1. Get Your Google API Key
-
-1. Visit: https://makersuite.google.com/app/apikey
-2. Sign in with Google
-3. Click "Create API Key"
-4. Copy the key
-
 ### 2. Configure the App
 
 1. Open `.streamlit/secrets.toml`

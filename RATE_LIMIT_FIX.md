@@ -2,7 +2,7 @@
 
 ## ✅ Improvements Made
 
-I've updated the application to handle Yahoo Finance rate limits much better. Here's what was changed:
+ updated the application to handle Yahoo Finance rate limits much better. Here's what was changed:
 
 ### 1. **Smart Retry Logic** 🔄
 

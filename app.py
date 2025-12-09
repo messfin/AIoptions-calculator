@@ -11,6 +11,7 @@ from typing import List, Dict, Literal, Optional
 from scipy.stats import norm
 from scipy.optimize import minimize_scalar
 import math
+from report_generator import create_word_report, create_pdf_report
 
 # Configure page
 st.set_page_config(
@@ -1341,23 +1342,83 @@ def main():
     st.markdown("## 🤖 AI-Powered Analysis")
 
     
+    # Initialize session state for analysis if not present
+    if 'analysis_content' not in st.session_state:
+        st.session_state.analysis_content = None
+    if 'analysis_strategy_name' not in st.session_state:
+        st.session_state.analysis_strategy_name = None
+    if 'analysis_metrics' not in st.session_state:
+        st.session_state.analysis_metrics = None
+
     if st.button("🚀 Generate Comprehensive Report", use_container_width=True):
         with st.spinner("Analyzing strategy with Google Gemini AI..."):
             analysis = generate_ai_analysis(strategy, ai_model)
+            st.session_state.analysis_content = analysis
+            st.session_state.analysis_strategy_name = strategy.name
+            st.session_state.analysis_metrics = strategy.get_metrics()
             
-            st.markdown(f"""
-                <div class="ai-report">
-                    {analysis.replace('\n', '<br>')}
-                </div>
-            """, unsafe_allow_html=True)
+    # Display analysis if available
+    if st.session_state.analysis_content:
+        analysis = st.session_state.analysis_content
+        # Use stored metadata for consistency
+        stored_strategy_name = st.session_state.analysis_strategy_name
+        stored_metrics = st.session_state.analysis_metrics
+        
+        st.markdown(f"""
+            <div class="ai-report">
+                {analysis.replace(chr(10), '<br>')}
+            </div>
+        """, unsafe_allow_html=True)
+        
+        # Extract signal if present
+        if "BUY" in analysis.upper() and "SELL" not in analysis.upper()[:analysis.upper().find("BUY")]:
+            st.markdown("<p class='buy-signal'>🟢 Signal: BUY</p>", unsafe_allow_html=True)
+        elif "SELL" in analysis.upper():
+            st.markdown("<p class='sell-signal'>🔴 Signal: SELL</p>", unsafe_allow_html=True)
+        elif "HOLD" in analysis.upper():
+            st.markdown("<p class='hold-signal'>🟡 Signal: HOLD</p>", unsafe_allow_html=True)
             
-            # Extract signal if present
-            if "BUY" in analysis.upper() and "SELL" not in analysis.upper()[:analysis.upper().find("BUY")]:
-                st.markdown("<p class='buy-signal'>🟢 Signal: BUY</p>", unsafe_allow_html=True)
-            elif "SELL" in analysis.upper():
-                st.markdown("<p class='sell-signal'>🔴 Signal: SELL</p>", unsafe_allow_html=True)
-            elif "HOLD" in analysis.upper():
-                st.markdown("<p class='hold-signal'>🟡 Signal: HOLD</p>", unsafe_allow_html=True)
+        # Download Buttons
+        st.markdown("### 📥 Download Report")
+        d_col1, d_col2, d_col3 = st.columns(3)
+        
+        # Prepare data for reports using STORED values
+        report_title = f"{stored_strategy_name} Analysis"
+        
+        # Text Download
+        with d_col1:
+            st.download_button(
+                label="📄 Download Text",
+                data=analysis,
+                file_name=f"{stored_strategy_name.replace(' ', '_')}_analysis.txt",
+                mime="text/plain"
+            )
+            
+        # Word Download
+        with d_col2:
+            try:
+                docx_file = create_word_report(report_title, stored_strategy_name, analysis, stored_metrics)
+                st.download_button(
+                    label="📝 Download Word",
+                    data=docx_file,
+                    file_name=f"{stored_strategy_name.replace(' ', '_')}_analysis.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
+            except Exception as e:
+                st.error(f"Word generation failed: {e}")
+
+        # PDF Download
+        with d_col3:
+            try:
+                pdf_file = create_pdf_report(report_title, stored_strategy_name, analysis, stored_metrics)
+                st.download_button(
+                    label="📕 Download PDF",
+                    data=pdf_file,
+                    file_name=f"{stored_strategy_name.replace(' ', '_')}_analysis.pdf",
+                    mime="application/pdf"
+                )
+            except Exception as e:
+                st.error(f"PDF generation failed: {e}")
     
     # Footer
     st.markdown("---")

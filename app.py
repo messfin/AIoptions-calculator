@@ -148,6 +148,7 @@ class OptionStrategy:
     legs: List[OptionLeg]
     stock_price: float
     underlying_shares: int = 0  # For strategies like covered call
+    symbol: str = "UNKNOWN"
     
     def calculate_payoff(self, price_range: np.ndarray) -> np.ndarray:
         """Calculate total payoff across price range"""
@@ -545,9 +546,11 @@ def calculate_probability_of_profit(strategy: 'OptionStrategy', iv=0.30):
     breakevens = metrics['breakeven_points']
     
     if not breakevens:
-        # For strategies with no breakeven or unlimited profit
-        if metrics['max_loss'] == metrics['min_loss']:
-            return 100.0 if metrics['max_profit'] > 0 else 0.0
+        # For strategies with no breakeven (always profit or always loss)
+        if metrics['max_loss'] > 0:
+            return 100.0
+        elif metrics['max_profit'] < 0:
+            return 0.0
         return 50.0
     
     # Calculate expected move based on IV
@@ -695,39 +698,120 @@ def initialize_gemini():
             return False
     return False
 
-def generate_ai_analysis(strategy: OptionStrategy, api_configured: bool) -> str:
+def generate_ai_analysis(strategy: OptionStrategy, api_configured: bool, context: Dict = None) -> str:
     """Generate AI-powered analysis of the options strategy"""
     if not api_configured:
         return "⚠️ AI Analysis not available. Please configure GOOGLE_API_KEY in Streamlit secrets."
     
     metrics = strategy.get_metrics()
+    greeks = calculate_strategy_greeks(strategy)
     
+    # Prepare context string
+    context_str = ""
+    if context:
+        if context.get('stock_data'):
+            sd = context['stock_data']
+            context_str += f"\nMarket Data:\n- Volume: {sd.get('volume', 'N/A')}\n- Change: {sd.get('change_percent', 0):.2f}%\n- Market Cap: {sd.get('market_cap', 'N/A')}\n"
+        
+        if context.get('iv_stats'):
+            ivs = context['iv_stats']
+            context_str += f"\nVolatility Analysis:\n- IV Rank: {ivs.get('iv_rank', 'N/A')}\n- IV Percentile: {ivs.get('iv_percentile', 'N/A')}\n- Current IV: {ivs.get('current_iv', 'N/A')}%\n"
+            
+        if context.get('pcr'):
+            pcr = context['pcr']
+            context_str += f"\nOptions Flow:\n- Put/Call Ratio (Vol): {pcr.get('pcr_volume', 'N/A')}\n- Put/Call Ratio (OI): {pcr.get('pcr_open_interest', 'N/A')}\n- Sentiment: {pcr.get('sentiment', 'N/A')}\n"
+            
+        if context.get('max_pain'):
+            context_str += f"\nMax Pain: ${context['max_pain']:.2f}\n"
+
     prompt = f"""
-    As an expert options trading analyst, provide a comprehensive analysis of the following options strategy:
+    As an expert options trading analyst, provide a comprehensive analysis of the following options strategy for {strategy.symbol}.
+    Base the entire report strictly on the data provided below.
+    
+    DATA PROVIDED:
     
     Strategy: {strategy.name}
+    Symbol: {strategy.symbol}
     Current Stock Price: ${strategy.stock_price:.2f}
     
-    Strategy Details:
+    Strategy Legs:
     {chr(10).join([f"- {leg.action.upper()} {leg.quantity} {leg.type.upper()} @ ${leg.strike:.2f}, Premium: ${leg.premium:.2f}" for leg in strategy.legs])}
     
-    Metrics:
+    Strategy Metrics:
     - Maximum Profit: ${metrics['max_profit']:.2f}
     - Maximum Loss: ${metrics['max_loss']:.2f}
     - Net Premium: ${metrics['net_premium']:.2f}
     - Risk/Reward Ratio: {metrics['risk_reward_ratio']:.2f}
     - Breakeven Points: {', '.join([f"${bp:.2f}" for bp in metrics['breakeven_points']]) if metrics['breakeven_points'] else 'None'}
     
-    Please provide:
-    1. **Strategy Overview**: Brief explanation of this strategy
-    2. **Market Outlook**: What market conditions favor this strategy
-    3. **Risk Analysis**: Key risks and risk management considerations
-    4. **Probability Assessment**: Likelihood of profit based on current setup
-    5. **BUY/SELL/HOLD Signal**: Clear recommendation with rationale
-    6. **Key Levels to Watch**: Important price levels for monitoring
-    7. **Exit Strategy**: Suggested profit-taking and stop-loss levels
+    Greeks Data (Total Strategy):
+    - Delta: {greeks['delta']:.2f}
+    - Gamma: {greeks['gamma']:.4f}
+    - Theta: {greeks['theta']:.2f}
+    - Vega: {greeks['vega']:.2f}
+    - Rho: {greeks['rho']:.2f}
     
-    Format your response professionally with clear sections and actionable insights.
+    {context_str}
+    
+    REPORT STRUCTURE TO GENERATE:
+    
+    1. **Ticker & Strategy Summary**
+       - Display the ticker symbol clearly at the top.
+       - Strategy type (e.g., {strategy.name}).
+       - Current stock price.
+       - Option contract details (strike, premium, expiration).
+       - Summary of key metrics: Max Profit, Max Loss, Net Premium, Breakeven Point(s), Risk/Reward Ratio.
+    
+    2. **Market Outlook**
+       - Provide a short assessment of whether the underlying market environment supports this strategy:
+         - Trend direction
+         - Support/Resistance
+         - Momentum indicators (if data is available)
+         - Volatility environment (high/low IV impact)
+    
+    3. **Greeks Analysis (EXPLAIN IMPACT BASED ON THE DATA)**
+       - Create a section that analyzes each Greek in context of the specific option using the SPECIFIC NUMBERS provided:
+         - **Delta ({greeks['delta']:.2f})**: Explain whether Delta is high/low and what that means for directional probability. Describe how Delta affects expected price movement of the option based on the current stock move.
+         - **Gamma ({greeks['gamma']:.4f})**: Explain how Gamma will affect how quickly Delta changes. Comment on how volatile the option becomes as it moves ITM/OTM.
+         - **Theta ({greeks['theta']:.2f})**: Explain how much the option loses daily due to time decay. Describe how close the option is to expiration and how that impacts profitability.
+         - **Vega ({greeks['vega']:.2f})**: If IV is high or low, explain how this increases/decreases the option’s price. Describe how an IV crush or expansion would impact this position.
+         - **Rho ({greeks['rho']:.2f})**: Briefly explain interest-rate sensitivity (low impact for short-dated contracts).
+    
+    4. **Strategy Overview**
+       - Explain:
+         - How the strategy works
+         - Why a trader would choose this setup
+         - What market conditions favor or hurt this trade
+         - Whether the strike selection is aggressive, safe, or risky based on current price
+    
+    5. **Risk Analysis**
+       - Cover:
+         - Maximum theoretical loss
+         - Major risk factors: Time decay, Low probability due to OTM strike, IV contraction, Incorrect timing
+         - Include risk-management suggestions: Position sizing, Time to expiration, How to monitor the trade
+    
+    6. **Probability Assessment**
+       - Evaluate:
+         - Probability of finishing ITM
+         - Probability of reaching breakeven
+         - Likelihood of achieving max profit based on actual price distance
+         - Any unrealistic targets
+         - Whether probability justifies the trade
+    
+    7. **BUY / SELL / HOLD Signal**
+       - Give a clear signal: BUY, SELL / AVOID, or HOLD
+       - Back it up with: Key reasons, Risk/reward justification, Probability of success, Market conditions
+    
+    8. **Key Levels to Watch**
+       - List: Current price, Strike price, Breakeven, Major support levels, Major resistance levels, Implied target needed for max profit (if applicable)
+    
+    9. **Exit Strategy**
+       - Include: Profit-taking plan, Stop-loss plan, Time-based exit, Technical exit triggers, What to do if IV spikes or crashes
+    
+    10. **Final Conclusion**
+        - Summarize: Risk vs reward, Probability, Whether the setup is realistic, Whether the trade is worth taking
+    
+    Ensure perfect grammar and professional financial terminology. Do not hallucinate data not provided.
     """
     
     # Try different model names (Google Gemini 2.5 is the latest)
@@ -883,9 +967,9 @@ def get_strategy_template(strategy_name: str, stock_price: float) -> List[Option
             OptionLeg("put", "sell", stock_price * 0.92, stock_price * 0.02, 1, 30)
         ],
         "Calendar Spread": [
-            # Sell near-term, buy far-term (neutral, profit from time decay)
-            OptionLeg("call", "sell", stock_price, stock_price * 0.04, 1, 20),  # Near-term
-            OptionLeg("call", "buy", stock_price, stock_price * 0.06, 1, 60)   # Far-term
+            # Buy longer-dated (more time), Sell shorter-dated (less time) - Same strike
+            OptionLeg("call", "buy", stock_price, stock_price * 0.06, 1, 60),   # Long-term (Buy)
+            OptionLeg("call", "sell", stock_price, stock_price * 0.04, 1, 30)   # Short-term (Sell)
         ],
         "Ratio Back Spread": [
             # Sell 1 ATM, Buy 2 OTM (profit from big move)
@@ -966,6 +1050,9 @@ def main():
         stock_data = None
         options_chain = None
         selected_expiration = None
+        iv_stats = None
+        pcr = None
+        max_pain = None
         
         if use_real_data:
             stock_symbol = st.text_input(
@@ -1129,9 +1216,16 @@ def main():
                         step=1,
                         key=f"quantity_{i}_edit"
                     )
+                    expiration = st.number_input(
+                        f"Days to Exp###{i}_edit",
+                        min_value=1,
+                        value=leg.expiration_days,
+                        step=1,
+                        key=f"expiration_{i}_edit"
+                    )
                 
                 edited_legs.append(OptionLeg(
-                    leg.type, leg.action, strike, premium, quantity, leg.expiration_days
+                    leg.type, leg.action, strike, premium, quantity, expiration
                 ))
             
             legs = edited_legs
@@ -1141,7 +1235,8 @@ def main():
             name=selected_strategy,
             legs=legs,
             stock_price=stock_price,
-            underlying_shares=stock_shares
+            underlying_shares=stock_shares,
+            symbol=stock_symbol if stock_symbol else "MANUAL"
         )
         
         # Calculate and display metrics
@@ -1352,7 +1447,15 @@ def main():
 
     if st.button("🚀 Generate Comprehensive Report", use_container_width=True):
         with st.spinner("Analyzing strategy with Google Gemini AI..."):
-            analysis = generate_ai_analysis(strategy, ai_model)
+            # Create context for AI
+            context = {
+                'stock_data': stock_data,
+                'iv_stats': iv_stats,
+                'pcr': pcr,
+                'max_pain': max_pain
+            }
+            
+            analysis = generate_ai_analysis(strategy, ai_model, context)
             st.session_state.analysis_content = analysis
             st.session_state.analysis_strategy_name = strategy.name
             st.session_state.analysis_metrics = strategy.get_metrics()

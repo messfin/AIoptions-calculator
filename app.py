@@ -1169,7 +1169,7 @@ def main():
         st.markdown("## 📊 Market Data")
         
         # Stock symbol input
-        use_real_data = st.checkbox("📈 Use Real-Time Market Data", value=False)
+        use_real_data = st.checkbox("📈 Use Real-Time Market Data", value=True)
         
         stock_symbol = ""
         stock_data = None

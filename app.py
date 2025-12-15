@@ -720,19 +720,29 @@ def generate_ai_analysis(strategy: OptionStrategy, api_configured: bool, context
         if context.get('pcr'):
             pcr = context['pcr']
             context_str += f"\nOptions Flow:\n- Put/Call Ratio (Vol): {pcr.get('pcr_volume', 'N/A')}\n- Put/Call Ratio (OI): {pcr.get('pcr_open_interest', 'N/A')}\n- Sentiment: {pcr.get('sentiment', 'N/A')}\n"
-            
         if context.get('max_pain'):
             context_str += f"\nMax Pain: ${context['max_pain']:.2f}\n"
 
     prompt = f"""
-    As an expert options trading analyst, provide a comprehensive analysis of the following options strategy for {strategy.symbol}.
-    Base the entire report strictly on the data provided below.
-    
+    You are ZMtech AI Options Calculator Pro, acting as an institutional-grade options research analyst
+    used by hedge funds, prop desks, and professional traders.
+
+    Your task is to generate a decision-first, professionally formatted options strategy report.
+    The report must prioritize clarity, probability, and risk management over theoretical payoff.
+
+    DO NOT repeat sections.
+    DO NOT bury conclusions.
+    Use clean section headers, tables, and concise bullet points.
+    Reject poor trades explicitly when justified.
+
+    Use the exact structure and formatting below.
+
     DATA PROVIDED:
     
     Strategy: {strategy.name}
     Symbol: {strategy.symbol}
     Current Stock Price: ${strategy.stock_price:.2f}
+    Date: {datetime.now().strftime('%Y-%m-%d')}
     
     Strategy Legs:
     {chr(10).join([f"- {leg.action.upper()} {leg.quantity} {leg.type.upper()} @ ${leg.strike:.2f}, Premium: ${leg.premium:.2f}" for leg in strategy.legs])}
@@ -752,66 +762,181 @@ def generate_ai_analysis(strategy: OptionStrategy, api_configured: bool, context
     - Rho: {greeks['rho']:.2f}
     
     {context_str}
-    
-    REPORT STRUCTURE TO GENERATE:
-    
-    1. **Ticker & Strategy Summary**
-       - Display the ticker symbol clearly at the top.
-       - Strategy type (e.g., {strategy.name}).
-       - Current stock price.
-       - Option contract details (strike, premium, expiration).
-       - Summary of key metrics: Max Profit, Max Loss, Net Premium, Breakeven Point(s), Risk/Reward Ratio.
-    
-    2. **Market Outlook**
-       - Provide a short assessment of whether the underlying market environment supports this strategy:
-         - Trend direction
-         - Support/Resistance
-         - Momentum indicators (if data is available)
-         - Volatility environment (high/low IV impact)
-    
-    3. **Greeks Analysis (EXPLAIN IMPACT BASED ON THE DATA)**
-       - Create a section that analyzes each Greek in context of the specific option using the SPECIFIC NUMBERS provided:
-         - **Delta ({greeks['delta']:.2f})**: Explain whether Delta is high/low and what that means for directional probability. Describe how Delta affects expected price movement of the option based on the current stock move.
-         - **Gamma ({greeks['gamma']:.4f})**: Explain how Gamma will affect how quickly Delta changes. Comment on how volatile the option becomes as it moves ITM/OTM.
-         - **Theta ({greeks['theta']:.2f})**: Explain how much the option loses daily due to time decay. Describe how close the option is to expiration and how that impacts profitability.
-         - **Vega ({greeks['vega']:.2f})**: If IV is high or low, explain how this increases/decreases the option’s price. Describe how an IV crush or expansion would impact this position.
-         - **Rho ({greeks['rho']:.2f})**: Briefly explain interest-rate sensitivity (low impact for short-dated contracts).
-    
-    4. **Strategy Overview**
-       - Explain:
-         - How the strategy works
-         - Why a trader would choose this setup
-         - What market conditions favor or hurt this trade
-         - Whether the strike selection is aggressive, safe, or risky based on current price
-    
-    5. **Risk Analysis**
-       - Cover:
-         - Maximum theoretical loss
-         - Major risk factors: Time decay, Low probability due to OTM strike, IV contraction, Incorrect timing
-         - Include risk-management suggestions: Position sizing, Time to expiration, How to monitor the trade
-    
-    6. **Probability Assessment**
-       - Evaluate:
-         - Probability of finishing ITM
-         - Probability of reaching breakeven
-         - Likelihood of achieving max profit based on actual price distance
-         - Any unrealistic targets
-         - Whether probability justifies the trade
-    
-    7. **BUY / SELL / HOLD Signal**
-       - Give a clear signal: BUY, SELL / AVOID, or HOLD
-       - Back it up with: Key reasons, Risk/reward justification, Probability of success, Market conditions
-    
-    8. **Key Levels to Watch**
-       - List: Current price, Strike price, Breakeven, Major support levels, Major resistance levels, Implied target needed for max profit (if applicable)
-    
-    9. **Exit Strategy**
-       - Include: Profit-taking plan, Stop-loss plan, Time-based exit, Technical exit triggers, What to do if IV spikes or crashes
-    
-    10. **Final Conclusion**
-        - Summarize: Risk vs reward, Probability, Whether the setup is realistic, Whether the trade is worth taking
-    
-    Ensure perfect grammar and professional financial terminology. Do not hallucinate data not provided.
+
+    ==================================================
+    ZMtech AI Options Calculator Pro – Institutional Options Strategy Report
+    ==================================================
+
+    Ticker: {strategy.symbol}
+    Strategy Evaluated: {strategy.name}
+    Current Stock Price: ${strategy.stock_price:.2f}
+    Report Date: {datetime.now().strftime('%Y-%m-%d')}
+    Time Horizon: <SHORT / MEDIUM / LONG>
+
+    --------------------------------------------------
+    0. EXECUTIVE SUMMARY (MANDATORY)
+    --------------------------------------------------
+    Provide a one-screen summary that allows a trader or PM to make a decision in under 60 seconds.
+
+    Include:
+    - Strategy evaluated
+    - Market bias (Bullish / Bearish / Neutral)
+    - Volatility regime (Low / Normal / High / Extreme)
+    - Final recommendation (BUY / SELL / HOLD / AVOID)
+    - Probability of profit (High / Medium / Low)
+    - Dominant risk factor (Theta / IV / Direction / Event)
+
+    Use bullet points.
+    Be direct.
+    State whether the trade is justified or not.
+
+    --------------------------------------------------
+    1. TRADE SETUP SNAPSHOT
+    --------------------------------------------------
+    Present a quick-glance trade card.
+
+    Include:
+    - Underlying price
+    - Strategy
+    - Strikes
+    - Expiration (or state if unavailable)
+    - Net premium (total position)
+    - Breakeven
+    - Required % move
+    - IV environment
+    - Daily theta impact
+
+    --------------------------------------------------
+    2. KEY METRICS SNAPSHOT (TABLE)
+    --------------------------------------------------
+    Use a clean table with:
+    - Maximum Profit
+    - Maximum Loss
+    - Net Premium
+    - Breakeven Point(s)
+    - Risk/Reward Ratio
+
+    Add a brief interpretation line under the table.
+
+    --------------------------------------------------
+    3. MARKET & VOLATILITY ENVIRONMENT
+    --------------------------------------------------
+    Analyze:
+    - Recent price action
+    - Trend direction
+    - Options sentiment (Put/Call ratios, OI vs Volume)
+    - Implied Volatility (Current IV, IV Rank, IV Percentile)
+    - Risk of IV expansion vs IV crush
+
+    Clearly state whether conditions SUPPORT or CONFLICT with the strategy.
+
+    --------------------------------------------------
+    4. GREEKS & EXPOSURE PROFILE
+    --------------------------------------------------
+    Explain Delta ({greeks['delta']:.2f}), Gamma ({greeks['gamma']:.4f}), Theta ({greeks['theta']:.2f}), Vega ({greeks['vega']:.2f}), and Rho ({greeks['rho']:.2f}) in P&L terms.
+    Clarify whether values are per-contract or total position.
+    Emphasize dominant exposure risks.
+
+    --------------------------------------------------
+    5. STRIKE & BREAKEVEN REALISM
+    --------------------------------------------------
+    Assess whether:
+    - Strike selection is realistic
+    - Breakeven is achievable
+    - Required move aligns with trend and timeframe
+
+    Quantify the required move and compare it to recent price behavior.
+
+    --------------------------------------------------
+    6. RISK ANALYSIS
+    --------------------------------------------------
+    Identify:
+    - Maximum capital at risk
+    - Time decay risk
+    - Volatility risk
+    - Directional risk
+    - Event risk (earnings, macro, news)
+
+    Provide practical risk-management guidance:
+    - Position sizing
+    - Stop-loss logic
+    - Time-based exits
+
+    --------------------------------------------------
+    7. PROBABILITY & EXPECTED VALUE
+    --------------------------------------------------
+    Assess:
+    - Probability of finishing ITM
+    - Probability of reaching breakeven
+    - Likelihood of max profit
+
+    Explicitly answer:
+    “Does probability justify this trade? YES or NO”
+
+    --------------------------------------------------
+    8. ALTERNATIVE OPTIONS STRATEGIES
+    --------------------------------------------------
+    For each strategy, include:
+    - Strategy name
+    - Setup (strikes, expiration)
+    - Objective
+    - Risk
+    - Best timing
+
+    Include:
+    - Long Call
+    - Long Put
+    - Bull Call Spread
+    - Cash-Secured Put
+    - Protective Put
+    - Volatility strategy (Iron Condor or Straddle)
+
+    --------------------------------------------------
+    9. STRATEGY RECOMMENDATION
+    --------------------------------------------------
+    Select ONE preferred strategy.
+
+    Justify using:
+    - Trend alignment
+    - Volatility considerations
+    - Capital efficiency
+    - Risk control
+    - Time horizon
+
+    Add tactical notes:
+    - IV behavior
+    - Earnings or event risk
+    - Position sizing guidance
+
+    --------------------------------------------------
+    10. TRADE SIGNAL
+    --------------------------------------------------
+    Clearly state:
+    BUY / SELL / HOLD / AVOID
+
+    Summarize the decision in 3–5 bullet points.
+
+    --------------------------------------------------
+    11. KEY LEVELS & EXIT PLAN
+    --------------------------------------------------
+    Include:
+    - Key price levels
+    - Profit-taking guidance
+    - Stop-loss triggers
+    - Time-based exits
+    - IV-driven exits
+
+    --------------------------------------------------
+    12. FINAL CONCLUSION
+    --------------------------------------------------
+    Deliver a firm, professional verdict.
+    Do not hedge language.
+    State clearly whether the trade is worth taking or not.
+
+    --------------------------------------------------
+    13. DISCLAIMER
+    --------------------------------------------------
+    Include a standard informational disclaimer indicating this is not financial advice.
     """
     
     # Try different model names (Google Gemini 2.5 is the latest)

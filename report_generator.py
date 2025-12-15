@@ -12,8 +12,14 @@ def create_word_report(title, strategy_name, content, metrics):
     doc = Document()
     
     # Title
-    heading = doc.add_heading(title, 0)
+    heading = doc.add_heading('ZMtech AI Options Calculator Pro - Report', 0)
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Subtitle (Analysis type)
+    if title:
+        subtitle = doc.add_paragraph(title)
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        subtitle.style = 'Subtitle'
     
     # Strategy Name
     doc.add_heading(f"Strategy: {strategy_name}", level=1)

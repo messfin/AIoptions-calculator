@@ -706,135 +706,298 @@ def generate_ai_analysis(strategy: OptionStrategy, api_configured: bool, context
     metrics = strategy.get_metrics()
     greeks = calculate_strategy_greeks(strategy)
     
-    # Prepare context string
+    # Prepare context string with safe formatting to remove numpy artifacts
     context_str = ""
     if context:
         if context.get('stock_data'):
             sd = context['stock_data']
-            context_str += f"\nMarket Data:\n- Volume: {sd.get('volume', 'N/A')}\n- Change: {sd.get('change_percent', 0):.2f}%\n- Market Cap: {sd.get('market_cap', 'N/A')}\n"
+            # Ensure native types
+            vol = int(sd.get('volume', 0))
+            chg = float(sd.get('change_percent', 0.0))
+            mcap = str(sd.get('market_cap', 'N/A'))
+            context_str += f"\nMarket Data:\n- Volume: {vol:,}\n- Change: {chg:.2f}%\n- Market Cap: {mcap}\n"
         
         if context.get('iv_stats'):
             ivs = context['iv_stats']
-            context_str += f"\nVolatility Analysis:\n- IV Rank: {ivs.get('iv_rank', 'N/A')}\n- IV Percentile: {ivs.get('iv_percentile', 'N/A')}\n- Current IV: {ivs.get('current_iv', 'N/A')}%\n"
+            # Float casting to prevent np.float64 artifacts
+            ivr = float(ivs.get('iv_rank', 0.0)) if isinstance(ivs.get('iv_rank'), (int, float)) else 0.0
+            ivp = float(ivs.get('iv_percentile', 0.0)) if isinstance(ivs.get('iv_percentile'), (int, float)) else 0.0
+            civ = float(ivs.get('current_iv', 0.0)) if isinstance(ivs.get('current_iv'), (int, float)) else 0.0
+            
+            context_str += f"\nVolatility Analysis:\n- IV Rank: {ivr:.2f}\n- IV Percentile: {ivp:.2f}\n- Current IV: {civ:.2f}%\n"
             
         if context.get('pcr'):
             pcr = context['pcr']
-            context_str += f"\nOptions Flow:\n- Put/Call Ratio (Vol): {pcr.get('pcr_volume', 'N/A')}\n- Put/Call Ratio (OI): {pcr.get('pcr_open_interest', 'N/A')}\n- Sentiment: {pcr.get('sentiment', 'N/A')}\n"
+            pcr_vol = float(pcr.get('pcr_volume', 0.0)) if isinstance(pcr.get('pcr_volume'), (int, float)) else 0.0
+            pcr_oi = float(pcr.get('pcr_open_interest', 0.0)) if isinstance(pcr.get('pcr_open_interest'), (int, float)) else 0.0
+            sent = str(pcr.get('sentiment', 'N/A'))
+            
+            context_str += f"\nOptions Flow:\n- Put/Call Ratio (Vol): {pcr_vol:.2f}\n- Put/Call Ratio (OI): {pcr_oi:.2f}\n- Sentiment: {sent}\n"
+            
         if context.get('max_pain'):
-            context_str += f"\nMax Pain: ${context['max_pain']:.2f}\n"
+            mp = float(context['max_pain']) if isinstance(context['max_pain'], (int, float)) else 0.0
+            context_str += f"\nMax Pain: ${mp:.2f}\n"
 
     prompt = f"""
-    You are ZMtech AI Options Calculator Pro, acting as a Senior Institutional Equity Derivatives Analyst.
-
-    Your task is to generate a **publication-ready Institutional Options Strategy Report**.
-    The output must strictly follow professional document formatting standards suitable for export to PDF/Word.
-
-    ### FORMATTING RULES (CRITICAL):
-    1. **No ASCII Separators**: Do NOT use `====` or `----`. Use clear Markdown Headers (`#`, `##`).
-    2. **Visual Risk Indicators**: Use the following "Traffic Light" system for risks and ratings:
-       - 🟢 (Favorable / Low Risk / Bullish)
-       - 🟡 (Neutral / Medium Risk / Caution)
-       - 🔴 (Unfavorable / High Risk / Bearish)
-    3. **Tables**: Present ALL numerical comparisons in Markdown tables (`| Col | Col |`).
-    4. **Typography**: Use **Bold** for metrics and key takeaways.
-    5. **Tone**: Institutional, direct, probability-focused. No fluff.
-
+    You are a senior institutional options strategy analyst and document formatter.
+    
+    Generate a publication-ready institutional options report following EXACT standards below.
+    
+    ═══════════════════════════════════════════════════════════════════════
+    CRITICAL FORMATTING RULES - FOLLOW EXACTLY
+    ═══════════════════════════════════════════════════════════════════════
+    
+    **NEVER use escape characters. Write these symbols directly:**
+    $ not \\$
+    % not \\%
+    ' not \\'
+    ** not \\*\\*
+    > not \\>
+    < not \\<
+    ~ not \\~
+    
+    **Table syntax - use EXACTLY:**
+    | Column 1 | Column 2 |
+    |---|---|
+    | Data 1 | Data 2 |
+    
+    **Number formatting:**
+    - Currency over $999: $4,226.76 (thousand separators)
+    - Currency under $999: $119.46
+    - Greeks: 31.69 (two decimals, can be negative like -8.94)
+    - Percentages: 30% (no decimals) or 9.96% (two decimals if needed)
+    - Ratios: 8.00:1
+    
+    **Impact gauges (5-level system):**
+    ●●●●● = Critical (5/5)
+    ●●●●○ = High (4/5)
+    ●●●○○ = Moderate (3/5)
+    ●●○○○ = Low (2/5)
+    ●○○○○ = Minimal (1/5)
+    
+    ═══════════════════════════════════════════════════════════════════════
+    
     DATA PROVIDED:
-    
-    Strategy: {strategy.name}
     Symbol: {strategy.symbol}
-    Current Stock Price: ${strategy.stock_price:.2f}
-    Date: {datetime.now().strftime('%Y-%m-%d')}
+    Strategy: {strategy.name}
+    Stock Price: ${float(strategy.stock_price):.2f}
+    Max Profit: ${float(metrics['max_profit']):.2f}
+    Max Loss: ${float(metrics['max_loss']):.2f}
+    Net Premium: ${float(metrics['net_premium']):.2f}
+    Risk/Reward: {float(metrics['risk_reward_ratio']):.2f}:1
+    Breakeven: {', '.join([f"${float(bp):.2f}" for bp in metrics.get('breakeven_points', [])]) if metrics.get('breakeven_points') else 'None'}
     
-    Strategy Legs:
-    {chr(10).join([f"- {leg.action.upper()} {leg.quantity} {leg.type.upper()} @ ${leg.strike:.2f}, Premium: ${leg.premium:.2f}" for leg in strategy.legs])}
+    Greeks:
+    Delta: {float(greeks['delta']):.2f}
+    Gamma: {float(greeks['gamma']):.4f}
+    Theta: {float(greeks['theta']):.2f}
+    Vega: {float(greeks['vega']):.2f}
+    Rho: {float(greeks.get('rho', 0.0)):.2f}
     
-    Strategy Metrics:
-    - Maximum Profit: ${metrics['max_profit']:.2f}
-    - Maximum Loss: ${metrics['max_loss']:.2f}
-    - Net Premium: ${metrics['net_premium']:.2f}
-    - Risk/Reward Ratio: {metrics['risk_reward_ratio']:.2f}
-    - Breakeven Points: {', '.join([f"${bp:.2f}" for bp in metrics['breakeven_points']]) if metrics['breakeven_points'] else 'None'}
-    
-    Greeks Data (Total Strategy):
-    - Delta: {greeks['delta']:.2f}
-    - Gamma: {greeks['gamma']:.4f}
-    - Theta: {greeks['theta']:.2f}
-    - Vega: {greeks['vega']:.2f}
-    - Rho: {greeks['rho']:.2f}
-    
+    Market Context:
     {context_str}
 
-    ---
-    
-    # 📑 Institutional Strategy Report: {strategy.symbol}
+    ═══════════════════════════════════════════════════════════════════════
+                ZMtech AI Options Calculator Pro
+             Institutional Options Strategy Analysis
+    ═══════════════════════════════════════════════════════════════════════
 
-    **Strategy Evaluated:** {strategy.name}  
-    **Date:** {datetime.now().strftime('%Y-%m-%d')}  
-    **Analyst:** ZMtech AI Options Desk
+    **{strategy.symbol.upper()}**  
+    **{strategy.name} Strategy Report**
 
-    ## 0. Executive Summary
-    
-    | Metric | Assessment |
-    | :--- | :--- |
-    | **Recommendation** | **[BUY / SELL / HOLD]** |
+    **Report Date:** {datetime.now().strftime('%B %d, %Y')}  
+    **Current Stock Price:** ${float(strategy.stock_price):.2f}  
+    **Analyst:** ZMtech AI Options Desk  
+    **Classification:** Internal Analysis | Educational Use Only
+
+    ═══════════════════════════════════════════════════════════════════════
+
+    ## STRATEGY SNAPSHOT
+
+    | Metric | Value |
+    |---|---|
+    | **Recommendation** | **[BUY/SELL/HOLD]** (Tactical/Strategic) |
     | **Market Bias** | [Bullish/Bearish/Neutral] |
-    | **Risk Rating** | [🟢/🟡/🔴] [Low/Medium/High] |
-    | **Probability** | [🟢/🟡/🔴] [Score out of 10] |
+    | **Risk Rating** | [Low/Medium/High] ([1-5]/5) |
+    | **Probability of Profit** | [XX]% ([High/Medium/Low]) |
+    | **Risk/Reward Ratio** | {float(metrics['risk_reward_ratio']):.2f}:1 |
+    | **Max Profit** | ${float(metrics['max_profit']):,.2f} ([XXX]% ROI) |
+    | **Max Risk** | ${float(metrics['max_loss']):,.2f} (100% of premium) |
+    | **Breakeven** | {', '.join([f"${float(bp):,.2f}" for bp in metrics.get('breakeven_points', [])]) if metrics.get('breakeven_points') else 'N/A'} ([+/-X.XX]% required) |
 
-    **Analyst Verdict:**
-    [Provide a concise, 2-3 sentence executive decision. Justify the recommendation based on risk/reward and probability.]
+    **Position Size:** [Recommended X-X% of options portfolio]  
+    **Recommended Expiration:** [XX-XX days]  
+    **Key Risk:** [Primary risk factor - be specific]
 
-    ## 1. Trade Setup & Key Metrics
+    ---
 
-    | Metric | Value | Interpretation |
-    | :--- | :--- | :--- |
-    | **Max Profit** | ${metrics['max_profit']:.2f} | [Comment on upside potential] |
-    | **Max Risk** | ${metrics['max_loss']:.2f} | [Comment on downside protection] |
-    | **Risk/Reward** | {metrics['risk_reward_ratio']:.2f} | [Is this ratio favorable?] |
-    | **Breakeven** | {', '.join([f"${bp:.2f}" for bp in metrics['breakeven_points']]) if metrics['breakeven_points'] else 'None'} | [Distance from current price] |
-    | **Net Premium** | ${metrics['net_premium']:.2f} | [Debit/Credit impact] |
+    ## EXECUTIVE SUMMARY
 
-    ## 2. Market & Volatility Analysis
+    **Recommendation: [BUY/SELL/HOLD]**
 
-    **Current Conditions:**
-    *   **Trend:** [Direction]
-    *   **Volatility (IV):** [Level & Rank]
-    *   **Sentiment:** [Put/Call Ratio analysis]
+    [Provide 2-3 sentence verdict. Start with "This [strategy name] presents a [favorable/unfavorable/neutral] opportunity..." Be direct about whether this is actionable.]
 
-    > **Context:** [Explain whether the current market environment SUPPORTS (🟢) or CONFLICTS (🔴) with this strategy.]
+    **Key Supporting Factors:**
+    - [Factor 1 - e.g., "Favorable risk/reward of X.XX:1"]
+    - [Factor 2 - e.g., "Current IV at XXth percentile supports premium selling"]
+    - [Factor 3 - e.g., "Technical setup supports directional bias"]
 
-    ## 3. Greeks & Risk Profile
+    **Primary Concerns:**
+    - [Concern 1 - e.g., "High theta decay of $X.XX/day requires immediate price action"]
+    - [Concern 2 - e.g., "Probability of profit only XX%"]
+    - [Concern 3 - e.g., "Adverse event risk within timeframe"]
 
-    | Greek | Value | P&L Impact Explanation |
-    | :--- | :--- | :--- |
-    | **Delta** | {greeks['delta']:.2f} | [Directional exposure] |
-    | **Gamma** | {greeks['gamma']:.4f} | [Acceleration risk] |
-    | **Theta** | {greeks['theta']:.2f} | [Daily time decay impact] |
-    | **Vega** | {greeks['vega']:.2f} | [Sensitivity to IV changes] |
+    **Conditions for Success:**
+    - [Condition 1 - specific price level or move required]
+    - [Condition 2 - timing requirement]
+    - [Condition 3 - market environment needed]
 
-    ## 4. Scenario Analysis
+    ---
 
-    *   **🐂 Bull Case:** [Outcome if stock rises]
-    *   **🦅 Base Case:** [Outcome if stock stagnates]
-    *   **🐻 Bear Case:** [Outcome if stock falls]
+    ## 1. TRADE SETUP & KEY METRICS
 
-    ## 5. Strategic Recommendation
+    | Metric | Value | Impact Assessment |
+    |---|---|---|
+    | **Net Premium** | ${float(metrics['net_premium']):,.2f} | [Debit paid / Credit collected] |
+    | **Max Profit** | ${float(metrics['max_profit']):,.2f} | [Upside potential - calculate ROI %] |
+    | **Max Risk** | ${float(metrics['max_loss']):,.2f} | [Capital at risk - % of premium or total] |
+    | **Breakeven** | {', '.join([f"${float(bp):,.2f}" for bp in metrics.get('breakeven_points', [])]) if metrics.get('breakeven_points') else 'N/A'} | [Calculate % move required from current] |
+    | **Risk/Reward** | {float(metrics['risk_reward_ratio']):.2f}:1 | [Assessment - is this favorable?] |
 
-    **Preferred Approach:** [Confirm if this strategy is the best choice or suggest an alternative]
+    **Performance Requirements:**
+    - Stock must move to {', '.join([f"${float(bp):,.2f}" for bp in metrics.get('breakeven_points', [])])} to breakeven
+    - [Calculate percentage move required]
+    - [Additional requirements based on strategy type]
+
+    ---
+
+    ## 2. MARKET & VOLATILITY ENVIRONMENT
+
+    **Current Market Conditions:**
+    - **Trend:** [Describe: Strong uptrend/Downtrend/Sideways/Consolidating]
+    - **Volatility (IV):** [Current IV level, IV Rank/Percentile if available, assessment]
+    - **Sentiment:** [Market sentiment from Put/Call ratios or other indicators if available]
+
+    **Environment Assessment:**
+    [2-3 sentences explaining whether current market conditions SUPPORT or CONFLICT with this strategy. Be specific about what would be ideal vs. current reality.]
+
+    ---
+
+    ## 3. GREEKS & RISK PROFILE
+
+    ### Greeks Exposure Analysis
+
+    | Greek | Value | Impact Level | P&L Impact | Risk Assessment |
+    |---|---|---|---|---|
+    | **Delta** | {float(greeks['delta']):.2f} | [●●●●○] | ${float(greeks['delta']):.2f} per $1 stock move | [Directional exposure - bullish/bearish/neutral] |
+    | **Gamma** | {float(greeks['gamma']):.4f} | [●●○○○] | Delta changes by {float(greeks['gamma']):.4f} per $1 move | [Acceleration risk - increases near expiration] |
+    | **Theta** | {float(greeks['theta']):.2f} | [●●●●●] | ${float(greeks['theta']):.2f} daily time decay | [Time decay - this is PRIMARY RISK if negative] |
+    | **Vega** | {float(greeks['vega']):.2f} | [●●●○○] | ${float(greeks['vega']):.2f} per 1% IV change | [IV sensitivity - volatility expansion/crush risk] |
+    | **Rho** | {float(greeks.get('rho', 0.0)):.2f} | [●○○○○] | ${float(greeks.get('rho', 0.0)):.2f} per 1% rate change | [Interest rate impact - usually minimal] |
+
+    **Impact Level Key:** ●●●●● Critical | ●●●●○ High | ●●●○○ Moderate | ●●○○○ Low | ●○○○○ Minimal
+
+    **Dominant Risk:** [Identify which Greek poses PRIMARY risk. Usually theta for buyers, delta for sellers.]
+
+    **Risk Interpretation:**
+    [Explain in plain language: "This position will [gain/lose] $X for every $1 the stock moves [up/down]. Time decay costs $X.XX per day, meaning you need the stock to move [direction] quickly to offset decay."]
+
+    ---
+
+    ## 4. SCENARIO ANALYSIS
+
+    ### Probability-Weighted Outcomes
+
+    | Scenario | Stock Price | Probability | Option Value | P&L | Outcome |
+    |---|---|---|---|---|---|
+    | 🐂 **Bull Case** | >[price target] | [XX]% | $[value] | $[profit/loss] | [Description of outcome] |
+    | 🦅 **Base Case** | ~[current range] | [XX]% | $[value] | $[profit/loss] | [Most likely outcome] |
+    | 🐻 **Bear Case** | <[downside level] | [XX]% | $[value] | $[profit/loss] | [Worst reasonable case] |
+
+    ### Expected Value Calculation
+    - Bull Case EV: [probability] × $[P&L] = $[result]
+    - Base Case EV: [probability] × $[P&L] = $[result]
+    - Bear Case EV: [probability] × $[P&L] = $[result]
+    - **Total Expected Value:** $[XX.XX]
+    - **Expected ROI:** [+/-XX]%
+
+    **Probability Assessment:** [Does the math justify this trade? Explain if expected value is positive/negative and what that means for decision.]
+
+    ---
+
+    ## 5. STRATEGIC RECOMMENDATION
+
+    ### Strategy Scorecard
+
+    | Factor | Score (1-5) | Weight | Comment |
+    |---|---|---|---|
+    | Trend Alignment | [X]/5 | 30% | [How well does strategy match trend?] |
+    | Volatility Fit | [X]/5 | 25% | [Is IV favorable for this strategy?] |
+    | Risk/Reward | [X]/5 | 25% | [Is ratio acceptable?] |
+    | Probability | [X]/5 | 20% | [Is probability of profit adequate?] |
+    | **WEIGHTED TOTAL** | **[X.XX]/5.0** | 100% | **[Overall Rating]** |
+
+    **Preferred Approach:** [Is this the optimal strategy or would you suggest an alternative? If alternative, explain why briefly.]
 
     **Tactical Adjustments:**
-    *   [Adjustment 1: e.g., Strike placement]
-    *   [Adjustment 2: e.g., Expiration selection]
-
-    ## 6. Risk Management Plan
-
-    *   🔴 **Stop Loss:** [Price level or % loss to cut]
-    *   🟢 **Profit Target:** [Price level or % gain to exit]
-    *   ⏱️ **Time Exit:** [When to exit relative to expiration]
+    - [Adjustment 1: Strike selection - move ITM/OTM?]
+    - [Adjustment 2: Expiration timing - add more time?]
+    - [Adjustment 3: Position sizing - reduce exposure?]
 
     ---
-    *Disclaimer: This report is for informational purposes only and does not constitute financial advice. Options trading involves significant risk.*
+
+    ## 6. RISK MANAGEMENT & EXIT PLAN
+
+    ### Exit Trigger Framework
+
+    | Trigger Type | Condition | Action Required | Priority |
+    |---|---|---|---|
+    | 🛑 **Stop Loss (Price)** | Stock < $[level] | Close position immediately | CRITICAL |
+    | 🛑 **Stop Loss (Loss %)** | Loss > [XX]% | Close position | HIGH |
+    | 🎯 **Profit Target 1** | Gain > [XX]% | Close [50]% of position | MEDIUM |
+    | 🎯 **Profit Target 2** | Gain > [XX]% | Close remaining | MEDIUM |
+    | ⏰ **Time Exit** | [XX] DTE | Evaluate roll or close | HIGH |
+    | 📊 **IV Exit** | IV [rises/falls] [X]% | Re-evaluate position | MEDIUM |
+
+    ### Position Monitoring Schedule
+    - **Daily:** Check stock price vs. breakeven, monitor theta decay impact
+    - **Weekly:** Review IV levels, assess if thesis still intact, adjust profit targets
+    - **Before Earnings/Events:** [Specific guidance for event risk]
+
+    ### Risk Mitigation
+    - **Position Size:** Limit to [X-X]% of options portfolio
+    - **Portfolio Impact:** Max loss of ${float(metrics['max_loss']):,.2f} = [X]% of total portfolio (calculate this)
+    - **Hedging:** [Consider protective strategies if applicable, or "None required for defined risk"]
+
+    ---
+
+    ## 7. FINAL VERDICT
+
+    **Signal: [BUY/SELL/HOLD]**
+
+    [Final 2-3 sentence conclusion. Be definitive: "This trade [is/is not] recommended because..." State the key reason clearly.]
+
+    **Required Conditions:**
+    ✓ [Condition 1 - must be met]  
+    ✓ [Condition 2 - must be met]  
+    ✓ [Condition 3 - must be met]
+
+    **Action Items:**
+    - [If BUY: "Enter position at market/limit order at $X.XX"]
+    - [Set stop loss at $X.XX]
+    - [Set profit targets as specified in exit plan]
+
+    ---
+
+    ## DISCLAIMER
+
+    This report is for educational and informational purposes only and does not constitute financial advice. Options trading involves substantial risk of loss and is not suitable for all investors. The probability assessments and projections are theoretical estimates based on mathematical models and do not guarantee future results. Always consult with a licensed financial advisor before making investment decisions. Past performance does not indicate future results.
+
+    **Risk Warning:** You can lose 100% of your investment in options. The Greeks and probabilities shown are estimates based on the Black-Scholes model and may not reflect actual market behavior. This analysis does not account for commission costs, slippage, bid-ask spreads, or tax implications. Market conditions can change rapidly, invalidating this analysis.
+
+    ═══════════════════════════════════════════════════════════════════════
+    Report Generated by ZMtech AI Options Calculator Pro | {datetime.now().strftime('%B %d, %Y %I:%M %p')}
+    ═══════════════════════════════════════════════════════════════════════
     """
     
     # Try different model names (Google Gemini 2.5 is the latest)
